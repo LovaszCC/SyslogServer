@@ -1,0 +1,29 @@
+services:
+  syslog-server:
+    build: .
+    env_file: .env
+    ports:
+      - "${SYSLOG_PORT:-514}:${SYSLOG_PORT:-514}/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${DB_USER:-syslog}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-syslog}
+      POSTGRES_DB: ${DB_NAME:-syslog}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-syslog}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
