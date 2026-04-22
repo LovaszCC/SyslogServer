@@ -1,0 +1,21 @@
+image:
+  repository: syslog-server
+  tag: latest
+
+syslogPort: 514
+
+db:
+  host: "postgres.database.svc.cluster.local"
+  port: "5432"
+  user: "syslog"
+  password: "syslog"
+  name: "syslog"
+  sslmode: "disable"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

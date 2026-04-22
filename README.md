@@ -104,3 +104,87 @@ docker compose down
 ```bash
 docker compose down -v
 ```
+
+## Kubernetes Deployment (Helm)
+
+A Helm chart is provided under `helm/syslog-server/` to deploy the syslog server against an external PostgreSQL cluster. All settings — including the syslog port — are configurable via Helm values.
+
+### Prerequisites
+
+- Helm 3 installed
+- A container registry with the built image
+- An existing PostgreSQL cluster accessible from the Kubernetes cluster
+
+### Build and push the image
+
+```bash
+docker build -t your-registry/syslog-server:latest .
+docker push your-registry/syslog-server:latest
+```
+
+### Deploy with default values
+
+```bash
+helm install syslog-server ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password
+```
+
+### Deploy with a custom port and database
+
+```bash
+helm install syslog-server ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set syslogPort=1514 \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password \
+  --set db.name=syslog_device_a
+```
+
+### All configurable values
+
+| Value              | Description              | Default                                  |
+|--------------------|--------------------------|------------------------------------------|
+| `image.repository` | Container image          | `syslog-server`                          |
+| `image.tag`        | Image tag                | `latest`                                 |
+| `syslogPort`       | UDP port to listen on    | `514`                                    |
+| `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
+| `db.port`          | PostgreSQL port          | `5432`                                   |
+| `db.user`          | PostgreSQL user          | `syslog`                                 |
+| `db.password`      | PostgreSQL password      | `syslog`                                 |
+| `db.name`          | PostgreSQL database name | `syslog`                                 |
+| `db.sslmode`       | PostgreSQL SSL mode      | `disable`                                |
+
+### Verify
+
+```bash
+kubectl get pods -l app=syslog-server
+kubectl logs -l app=syslog-server
+```
+
+### Get the external IP
+
+```bash
+kubectl get svc syslog-server
+```
+
+### Running multiple instances on Kubernetes
+
+Install the chart multiple times with different release names, ports, and databases:
+
+```bash
+helm install device-a ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set syslogPort=1514 \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password \
+  --set db.name=syslog_device_a
+
+helm install device-b ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set syslogPort=1515 \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password \
+  --set db.name=syslog_device_b
+```
