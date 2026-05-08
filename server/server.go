@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,21 +21,46 @@ import (
 
 type Server struct {
 	port          string
+	protocol      string
 	proxyProtocol bool
 	storage       *storage.Storage
-	listener      net.Listener
+	tcpListener   net.Listener
+	udpConn       *net.UDPConn
 	wg            sync.WaitGroup
 }
 
-func New(port string, proxyProtocol bool, store *storage.Storage) *Server {
+func New(port, protocol string, proxyProtocol bool, store *storage.Storage) *Server {
 	return &Server{
 		port:          port,
+		protocol:      strings.ToLower(protocol),
 		proxyProtocol: proxyProtocol,
 		storage:       store,
 	}
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	switch s.protocol {
+	case "tcp":
+		return s.startTCP(ctx)
+	case "udp":
+		return s.startUDP(ctx)
+	case "both":
+		errCh := make(chan error, 2)
+		go func() { errCh <- s.startTCP(ctx) }()
+		go func() { errCh <- s.startUDP(ctx) }()
+		var firstErr error
+		for i := 0; i < 2; i++ {
+			if err := <-errCh; err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	default:
+		return fmt.Errorf("unsupported protocol: %s (want tcp|udp|both)", s.protocol)
+	}
+}
+
+func (s *Server) startTCP(ctx context.Context) error {
 	lc := net.ListenConfig{}
 	listener, err := lc.Listen(ctx, "tcp", ":"+s.port)
 	if err != nil {
@@ -53,16 +79,16 @@ func (s *Server) Start(ctx context.Context) error {
 	} else {
 		log.Printf("Syslog server listening on TCP port %s", s.port)
 	}
-	s.listener = listener
+	s.tcpListener = listener
 
 	go func() {
 		<-ctx.Done()
-		log.Println("Shutting down syslog server...")
-		s.listener.Close()
+		log.Println("Shutting down TCP syslog server...")
+		s.tcpListener.Close()
 	}()
 
 	for {
-		conn, err := s.listener.Accept()
+		conn, err := s.tcpListener.Accept()
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				s.wg.Wait()
@@ -75,6 +101,64 @@ func (s *Server) Start(ctx context.Context) error {
 		s.wg.Add(1)
 		go s.handleConn(ctx, conn)
 	}
+}
+
+func (s *Server) startUDP(ctx context.Context) error {
+	addr, err := net.ResolveUDPAddr("udp", ":"+s.port)
+	if err != nil {
+		return fmt.Errorf("resolve udp: %w", err)
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return fmt.Errorf("listen udp: %w", err)
+	}
+	s.udpConn = conn
+	log.Printf("Syslog server listening on UDP port %s", s.port)
+
+	go func() {
+		<-ctx.Done()
+		log.Println("Shutting down UDP syslog server...")
+		s.udpConn.Close()
+	}()
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, src, err := s.udpConn.ReadFromUDP(buf)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			log.Printf("UDP read error: %v", err)
+			continue
+		}
+		s.handleDatagram(ctx, buf[:n], src)
+	}
+}
+
+func (s *Server) handleDatagram(ctx context.Context, data []byte, src *net.UDPAddr) {
+	sourceIP := ""
+	if src != nil {
+		sourceIP = src.IP.String()
+	}
+
+	raw := strings.TrimRight(string(data), "\r\n\x00")
+	if raw == "" {
+		return
+	}
+
+	msg, err := parser.Parse(raw)
+	if err != nil {
+		log.Printf("Parse error from %s: %v (raw: %q)", sourceIP, err, raw)
+		return
+	}
+
+	if err := s.storage.Insert(ctx, msg, sourceIP); err != nil {
+		log.Printf("Storage error: %v", err)
+		return
+	}
+
+	log.Printf("Stored log from %s [%s] %s: %s",
+		sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -118,8 +202,11 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 }
 
 func (s *Server) Stop() {
-	if s.listener != nil {
-		s.listener.Close()
+	if s.tcpListener != nil {
+		s.tcpListener.Close()
+	}
+	if s.udpConn != nil {
+		s.udpConn.Close()
 	}
 	s.wg.Wait()
 }

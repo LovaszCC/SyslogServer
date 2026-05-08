@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	SyslogPort    string
+	Protocol      string
 	ProxyProtocol bool
 	DBHost        string
 	DBPort        string
@@ -20,6 +21,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		SyslogPort:    getEnv("SYSLOG_PORT", "514"),
+		Protocol:      getEnv("PROTOCOL", "tcp"),
 		ProxyProtocol: getEnvBool("PROXY_PROTOCOL", false),
 		DBHost:        getEnv("DB_HOST", "localhost"),
 		DBPort:        getEnv("DB_PORT", "5432"),
