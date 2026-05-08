@@ -2,11 +2,13 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -83,6 +85,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Split(splitSyslog)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -140,4 +143,43 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// splitSyslog handles RFC6587 octet-counting, newline, and null-byte framing.
+func splitSyslog(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	if data[0] >= '0' && data[0] <= '9' {
+		if sp := bytes.IndexByte(data, ' '); sp > 0 {
+			if n, err := strconv.Atoi(string(data[:sp])); err == nil && n > 0 {
+				if len(data) >= sp+1+n {
+					return sp + 1 + n, data[sp+1 : sp+1+n], nil
+				}
+				if atEOF {
+					return len(data), data, nil
+				}
+				return 0, nil, nil
+			}
+		}
+	}
+
+	for i, b := range data {
+		if b == '\n' || b == 0 {
+			return i + 1, dropCR(data[:i]), nil
+		}
+	}
+
+	if atEOF {
+		return len(data), dropCR(data), nil
+	}
+	return 0, nil, nil
+}
+
+func dropCR(d []byte) []byte {
+	if len(d) > 0 && d[len(d)-1] == '\r' {
+		return d[:len(d)-1]
+	}
+	return d
 }
