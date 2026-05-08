@@ -23,23 +23,24 @@ func Parse(raw string) (*SyslogMessage, error) {
 		return nil, fmt.Errorf("empty message")
 	}
 
-	if raw[0] != '<' {
-		return nil, fmt.Errorf("missing priority")
-	}
+	// Default facility=user(1), severity=notice(5) when PRI absent
+	facility := 1
+	severity := 5
+	rest := raw
 
-	closeBracket := strings.Index(raw, ">")
-	if closeBracket < 0 {
-		return nil, fmt.Errorf("malformed priority")
+	if raw[0] == '<' {
+		closeBracket := strings.Index(raw, ">")
+		if closeBracket < 0 {
+			return nil, fmt.Errorf("malformed priority")
+		}
+		pri, err := strconv.Atoi(raw[1:closeBracket])
+		if err != nil {
+			return nil, fmt.Errorf("invalid priority: %w", err)
+		}
+		facility = pri / 8
+		severity = pri % 8
+		rest = raw[closeBracket+1:]
 	}
-
-	pri, err := strconv.Atoi(raw[1:closeBracket])
-	if err != nil {
-		return nil, fmt.Errorf("invalid priority: %w", err)
-	}
-
-	facility := pri / 8
-	severity := pri % 8
-	rest := raw[closeBracket+1:]
 
 	msg := &SyslogMessage{
 		Facility: facility,
