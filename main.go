@@ -30,7 +30,7 @@ func main() {
 	}
 	log.Println("Database schema initialized")
 
-	srv := server.New(cfg.SyslogPort, store)
+	srv := server.New(cfg.SyslogPort, cfg.ProxyProtocol, store)
 
 	if err := srv.Start(ctx); err != nil {
 		log.Fatalf("Server error: %v", err)

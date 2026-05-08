@@ -3,6 +3,7 @@ image:
   tag: latest
 
 syslogPort: 514
+proxyProtocol: false
 
 db:
   host: "postgres.database.svc.cluster.local"

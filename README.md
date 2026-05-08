@@ -9,6 +9,7 @@ All settings are configured via environment variables:
 | Variable      | Description              | Default     |
 |---------------|--------------------------|-------------|
 | `SYSLOG_PORT` | TCP port to listen on    | `514`       |
+| `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each connection | `false` |
 | `DB_HOST`     | PostgreSQL host          | `localhost` |
 | `DB_PORT`     | PostgreSQL port          | `5432`      |
 | `DB_USER`     | PostgreSQL user          | `syslog`    |
@@ -149,6 +150,7 @@ helm install syslog-server ./helm/syslog-server \
 | `image.repository` | Container image          | `syslog-server`                          |
 | `image.tag`        | Image tag                | `latest`                                 |
 | `syslogPort`       | TCP port to listen on    | `514`                                    |
+| `proxyProtocol`    | Expect HAProxy PROXY protocol | `false`                             |
 | `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
 | `db.port`          | PostgreSQL port          | `5432`                                   |
 | `db.user`          | PostgreSQL user          | `syslog`                                 |

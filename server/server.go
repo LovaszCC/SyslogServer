@@ -8,22 +8,27 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
+
+	proxyproto "github.com/pires/go-proxyproto"
 
 	"syslog-server/parser"
 	"syslog-server/storage"
 )
 
 type Server struct {
-	port     string
-	storage  *storage.Storage
-	listener net.Listener
-	wg       sync.WaitGroup
+	port          string
+	proxyProtocol bool
+	storage       *storage.Storage
+	listener      net.Listener
+	wg            sync.WaitGroup
 }
 
-func New(port string, store *storage.Storage) *Server {
+func New(port string, proxyProtocol bool, store *storage.Storage) *Server {
 	return &Server{
-		port:    port,
-		storage: store,
+		port:          port,
+		proxyProtocol: proxyProtocol,
+		storage:       store,
 	}
 }
 
@@ -33,9 +38,20 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen tcp: %w", err)
 	}
-	s.listener = listener
 
-	log.Printf("Syslog server listening on TCP port %s", s.port)
+	if s.proxyProtocol {
+		listener = &proxyproto.Listener{
+			Listener:          listener,
+			ReadHeaderTimeout: 5 * time.Second,
+			Policy: func(upstream net.Addr) (proxyproto.Policy, error) {
+				return proxyproto.REQUIRE, nil
+			},
+		}
+		log.Printf("Syslog server listening on TCP port %s (PROXY protocol enabled)", s.port)
+	} else {
+		log.Printf("Syslog server listening on TCP port %s", s.port)
+	}
+	s.listener = listener
 
 	go func() {
 		<-ctx.Done()
@@ -63,10 +79,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
-	sourceIP := ""
-	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
-		sourceIP = addr.IP.String()
-	}
+	sourceIP := remoteIP(conn.RemoteAddr())
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -106,6 +119,20 @@ func (s *Server) Stop() {
 		s.listener.Close()
 	}
 	s.wg.Wait()
+}
+
+func remoteIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	if tcp, ok := addr.(*net.TCPAddr); ok {
+		return tcp.IP.String()
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+	return host
 }
 
 func truncate(s string, maxLen int) string {
