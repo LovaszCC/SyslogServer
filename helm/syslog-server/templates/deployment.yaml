@@ -18,8 +18,16 @@ spec:
         - name: syslog-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           ports:
+            {{- if or (eq .Values.protocol "tcp") (eq .Values.protocol "both") }}
             - containerPort: {{ .Values.syslogPort }}
               protocol: TCP
+              name: syslog-tcp
+            {{- end }}
+            {{- if or (eq .Values.protocol "udp") (eq .Values.protocol "both") }}
+            - containerPort: {{ .Values.syslogPort }}
+              protocol: UDP
+              name: syslog-udp
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-config

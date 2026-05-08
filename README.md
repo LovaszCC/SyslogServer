@@ -1,6 +1,6 @@
 # Syslog Server
 
-A Go-based syslog server that accepts TCP syslog messages (RFC 3164 and RFC 5424, newline-delimited per RFC 6587 non-transparent framing) and stores them in PostgreSQL. Runs in Docker with full environment-based configuration for multi-instance deployments.
+A Go-based syslog server that accepts TCP and/or UDP syslog messages (RFC 3164 and RFC 5424; TCP framing supports RFC 6587 octet-counting, newline, and null-byte delimiters) and stores them in PostgreSQL. Runs in Docker with full environment-based configuration for multi-instance deployments.
 
 ## Configuration
 
@@ -8,8 +8,9 @@ All settings are configured via environment variables:
 
 | Variable      | Description              | Default     |
 |---------------|--------------------------|-------------|
-| `SYSLOG_PORT` | TCP port to listen on    | `514`       |
-| `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each connection | `false` |
+| `SYSLOG_PORT` | Port to listen on        | `514`       |
+| `PROTOCOL`    | Transport: `tcp`, `udp`, or `both` | `tcp` |
+| `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each TCP connection | `false` |
 | `DB_HOST`     | PostgreSQL host          | `localhost` |
 | `DB_PORT`     | PostgreSQL port          | `5432`      |
 | `DB_USER`     | PostgreSQL user          | `syslog`    |
@@ -70,16 +71,22 @@ docker compose --env-file .env.device-b -p device-b up --build -d
 
 ## Testing
 
-### Send a test syslog message (RFC 3164)
+### Send a test syslog message (RFC 3164, TCP)
 
 ```bash
 echo "<13>Apr 22 10:00:00 myhost myapp: test message" | nc -w1 localhost 514
 ```
 
-### Send a test syslog message (RFC 5424)
+### Send a test syslog message (RFC 5424, TCP)
 
 ```bash
 echo '<165>1 2026-04-22T10:00:00Z myhost myapp 1234 ID47 - Test message from RFC 5424' | nc -w1 localhost 514
+```
+
+### Send a test syslog message over UDP
+
+```bash
+echo "<13>Apr 22 10:00:00 myhost myapp: udp test" | nc -u -w1 localhost 514
 ```
 
 ### Query stored logs
@@ -149,8 +156,9 @@ helm install syslog-server ./helm/syslog-server \
 |--------------------|--------------------------|------------------------------------------|
 | `image.repository` | Container image          | `syslog-server`                          |
 | `image.tag`        | Image tag                | `latest`                                 |
-| `syslogPort`       | TCP port to listen on    | `514`                                    |
-| `proxyProtocol`    | Expect HAProxy PROXY protocol | `false`                             |
+| `syslogPort`       | Port to listen on        | `514`                                    |
+| `protocol`         | Transport: `tcp`, `udp`, or `both` | `udp`                          |
+| `proxyProtocol`    | Expect HAProxy PROXY protocol (TCP only) | `false`                      |
 | `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
 | `db.port`          | PostgreSQL port          | `5432`                                   |
 | `db.user`          | PostgreSQL user          | `syslog`                                 |

@@ -7,7 +7,15 @@ spec:
   selector:
     app: {{ .Release.Name }}
   ports:
+    {{- if or (eq .Values.protocol "tcp") (eq .Values.protocol "both") }}
     - port: {{ .Values.syslogPort }}
       targetPort: {{ .Values.syslogPort }}
       protocol: TCP
       name: syslog-tcp
+    {{- end }}
+    {{- if or (eq .Values.protocol "udp") (eq .Values.protocol "both") }}
+    - port: {{ .Values.syslogPort }}
+      targetPort: {{ .Values.syslogPort }}
+      protocol: UDP
+      name: syslog-udp
+    {{- end }}

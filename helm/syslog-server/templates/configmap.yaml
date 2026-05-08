@@ -4,6 +4,7 @@ metadata:
   name: {{ .Release.Name }}-config
 data:
   SYSLOG_PORT: {{ .Values.syslogPort | quote }}
+  PROTOCOL: {{ .Values.protocol | quote }}
   PROXY_PROTOCOL: {{ .Values.proxyProtocol | quote }}
   DB_HOST: {{ .Values.db.host | quote }}
   DB_PORT: {{ .Values.db.port | quote }}

@@ -3,6 +3,8 @@ image:
   tag: latest
 
 syslogPort: 514
+# protocol: tcp | udp | both
+protocol: udp
 proxyProtocol: false
 
 db:
