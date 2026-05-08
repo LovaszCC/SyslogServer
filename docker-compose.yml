@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     ports:
-      - "${SYSLOG_PORT:-514}:${SYSLOG_PORT:-514}/udp"
+      - "${SYSLOG_PORT:-514}:${SYSLOG_PORT:-514}/tcp"
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,19 +1,23 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"sync"
 
 	"syslog-server/parser"
 	"syslog-server/storage"
 )
 
 type Server struct {
-	port    string
-	storage *storage.Storage
-	conn    *net.UDPConn
+	port     string
+	storage  *storage.Storage
+	listener net.Listener
+	wg       sync.WaitGroup
 }
 
 func New(port string, store *storage.Storage) *Server {
@@ -24,38 +28,58 @@ func New(port string, store *storage.Storage) *Server {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	addr, err := net.ResolveUDPAddr("udp", ":"+s.port)
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", ":"+s.port)
 	if err != nil {
-		return fmt.Errorf("resolve address: %w", err)
+		return fmt.Errorf("listen tcp: %w", err)
 	}
+	s.listener = listener
 
-	s.conn, err = net.ListenUDP("udp", addr)
-	if err != nil {
-		return fmt.Errorf("listen udp: %w", err)
-	}
+	log.Printf("Syslog server listening on TCP port %s", s.port)
 
-	log.Printf("Syslog server listening on UDP port %s", s.port)
+	go func() {
+		<-ctx.Done()
+		log.Println("Shutting down syslog server...")
+		s.listener.Close()
+	}()
 
-	buf := make([]byte, 65535)
 	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Shutting down syslog server...")
-			return s.conn.Close()
-		default:
-		}
-
-		n, remoteAddr, err := s.conn.ReadFromUDP(buf)
+		conn, err := s.listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				s.wg.Wait()
 				return nil
 			}
-			log.Printf("Read error: %v", err)
+			log.Printf("Accept error: %v", err)
 			continue
 		}
 
-		raw := string(buf[:n])
-		sourceIP := remoteAddr.IP.String()
+		s.wg.Add(1)
+		go s.handleConn(ctx, conn)
+	}
+}
+
+func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
+	defer s.wg.Done()
+	defer conn.Close()
+
+	sourceIP := ""
+	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		sourceIP = addr.IP.String()
+	}
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return
+		}
+
+		raw := scanner.Text()
+		if raw == "" {
+			continue
+		}
 
 		msg, err := parser.Parse(raw)
 		if err != nil {
@@ -71,12 +95,17 @@ func (s *Server) Start(ctx context.Context) error {
 		log.Printf("Stored log from %s [%s] %s: %s",
 			sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 	}
+
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		log.Printf("Read error from %s: %v", sourceIP, err)
+	}
 }
 
 func (s *Server) Stop() {
-	if s.conn != nil {
-		s.conn.Close()
+	if s.listener != nil {
+		s.listener.Close()
 	}
+	s.wg.Wait()
 }
 
 func truncate(s string, maxLen int) string {
