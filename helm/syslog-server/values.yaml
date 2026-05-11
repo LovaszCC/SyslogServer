@@ -6,6 +6,8 @@ syslogPort: 514
 # protocol: tcp | udp | both
 protocol: udp
 proxyProtocol: false
+# vendorType: "" (generic) | mikrotik
+vendorType: ""
 
 db:
   host: "postgres.database.svc.cluster.local"

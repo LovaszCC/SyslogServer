@@ -16,6 +16,7 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 
 	"syslog-server/parser"
+	"syslog-server/resolver"
 	"syslog-server/storage"
 )
 
@@ -23,18 +24,22 @@ type Server struct {
 	port          string
 	protocol      string
 	proxyProtocol bool
+	vendorType    string
 	storage       *storage.Storage
+	resolver      *resolver.Resolver
 	tcpListener   net.Listener
 	udpConn       *net.UDPConn
 	wg            sync.WaitGroup
 }
 
-func New(port, protocol string, proxyProtocol bool, store *storage.Storage) *Server {
+func New(port, protocol, vendorType string, proxyProtocol bool, store *storage.Storage) *Server {
 	return &Server{
 		port:          port,
 		protocol:      strings.ToLower(protocol),
 		proxyProtocol: proxyProtocol,
+		vendorType:    vendorType,
 		storage:       store,
+		resolver:      resolver.New(),
 	}
 }
 
@@ -146,19 +151,21 @@ func (s *Server) handleDatagram(ctx context.Context, data []byte, src *net.UDPAd
 		return
 	}
 
-	msg, err := parser.Parse(raw)
+	msg, err := parser.Parse(raw, s.vendorType)
 	if err != nil {
 		log.Printf("Parse error from %s: %v (raw: %q)", sourceIP, err, raw)
 		return
 	}
 
-	if err := s.storage.Insert(ctx, msg, sourceIP); err != nil {
+	sourceHostname := s.resolver.Lookup(ctx, sourceIP)
+
+	if err := s.storage.Insert(ctx, msg, sourceIP, sourceHostname); err != nil {
 		log.Printf("Storage error: %v", err)
 		return
 	}
 
-	log.Printf("Stored log from %s [%s] %s: %s",
-		sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
+	log.Printf("Stored log from %s (%s) [%s] %s: %s",
+		sourceIP, sourceHostname, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -166,6 +173,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	sourceIP := remoteIP(conn.RemoteAddr())
+	sourceHostname := s.resolver.Lookup(ctx, sourceIP)
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -181,19 +189,19 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			continue
 		}
 
-		msg, err := parser.Parse(raw)
+		msg, err := parser.Parse(raw, s.vendorType)
 		if err != nil {
 			log.Printf("Parse error from %s: %v (raw: %q)", sourceIP, err, raw)
 			continue
 		}
 
-		if err := s.storage.Insert(ctx, msg, sourceIP); err != nil {
+		if err := s.storage.Insert(ctx, msg, sourceIP, sourceHostname); err != nil {
 			log.Printf("Storage error: %v", err)
 			continue
 		}
 
-		log.Printf("Stored log from %s [%s] %s: %s",
-			sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
+		log.Printf("Stored log from %s (%s) [%s] %s: %s",
+			sourceIP, sourceHostname, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {

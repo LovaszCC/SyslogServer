@@ -6,6 +6,7 @@ data:
   SYSLOG_PORT: {{ .Values.syslogPort | quote }}
   PROTOCOL: {{ .Values.protocol | quote }}
   PROXY_PROTOCOL: {{ .Values.proxyProtocol | quote }}
+  VENDOR_TYPE: {{ .Values.vendorType | quote }}
   DB_HOST: {{ .Values.db.host | quote }}
   DB_PORT: {{ .Values.db.port | quote }}
   DB_USER: {{ .Values.db.user | quote }}

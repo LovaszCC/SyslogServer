@@ -11,13 +11,13 @@ type SyslogMessage struct {
 	Timestamp time.Time
 	Hostname  string
 	AppName   string
-	Facility  int
-	Severity  int
+	Facility  string
+	Severity  string
 	Message   string
 	Raw       string
 }
 
-func Parse(raw string) (*SyslogMessage, error) {
+func Parse(raw, vendorType string) (*SyslogMessage, error) {
 	raw = strings.TrimSpace(raw)
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("empty message")
@@ -43,8 +43,8 @@ func Parse(raw string) (*SyslogMessage, error) {
 	}
 
 	msg := &SyslogMessage{
-		Facility: facility,
-		Severity: severity,
+		Facility: strconv.Itoa(facility),
+		Severity: strconv.Itoa(severity),
 		Raw:      raw,
 	}
 
@@ -53,6 +53,11 @@ func Parse(raw string) (*SyslogMessage, error) {
 		parseRFC5424(rest, msg)
 	} else {
 		parseRFC3164(rest, msg)
+	}
+
+	switch strings.ToLower(vendorType) {
+	case "mikrotik":
+		applyMikroTik(msg)
 	}
 
 	return msg, nil
