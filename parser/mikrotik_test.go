@@ -21,6 +21,41 @@ func TestMikroTikParse(t *testing.T) {
 	}
 }
 
+func TestVPNKeepsSD(t *testing.T) {
+	raw := "<134>1 2026-05-11T08:43:48.661Z vpnsrv vpn-management 2754235 vpn.disconnect [vpn@32473 common_name=\"koczor2\" vpn_ip=\"10.214.12.181\" client_ip=\"39.144.89.149\" bytes_received=\"0\" bytes_sent=\"0\" rules_removed=\"2\"] \ufeffVPN disconnect koczor2 (10.214.12.181) duration=0s"
+	msg, err := Parse(raw, "vpn")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	wantPrefix := `[vpn@32473 common_name="koczor2"`
+	if !contains(msg.Message, wantPrefix) {
+		t.Errorf("Message = %q, want prefix %q", msg.Message, wantPrefix)
+	}
+	if msg.Hostname != "vpnsrv" {
+		t.Errorf("Hostname = %q", msg.Hostname)
+	}
+	if msg.AppName != "vpn-management" {
+		t.Errorf("AppName = %q", msg.AppName)
+	}
+	// PRI=134 → facility=16 severity=6
+	if msg.Facility != "16" || msg.Severity != "6" {
+		t.Errorf("got fac=%q sev=%q want 16/6", msg.Facility, msg.Severity)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestNoVendorKeepsRFCValues(t *testing.T) {
 	raw := `<13>Oct 11 22:14:15 host1 app1: hello world`
 	msg, err := Parse(raw, "")

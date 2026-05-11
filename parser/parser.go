@@ -58,6 +58,8 @@ func Parse(raw, vendorType string) (*SyslogMessage, error) {
 	switch strings.ToLower(vendorType) {
 	case "mikrotik":
 		applyMikroTik(msg)
+	case "vpn":
+		applyVPN(msg)
 	}
 
 	return msg, nil
