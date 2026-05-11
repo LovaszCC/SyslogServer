@@ -16,7 +16,6 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 
 	"syslog-server/parser"
-	"syslog-server/resolver"
 	"syslog-server/storage"
 )
 
@@ -26,7 +25,6 @@ type Server struct {
 	proxyProtocol bool
 	vendorType    string
 	storage       *storage.Storage
-	resolver      *resolver.Resolver
 	tcpListener   net.Listener
 	udpConn       *net.UDPConn
 	wg            sync.WaitGroup
@@ -39,7 +37,6 @@ func New(port, protocol, vendorType string, proxyProtocol bool, store *storage.S
 		proxyProtocol: proxyProtocol,
 		vendorType:    vendorType,
 		storage:       store,
-		resolver:      resolver.New(),
 	}
 }
 
@@ -157,15 +154,13 @@ func (s *Server) handleDatagram(ctx context.Context, data []byte, src *net.UDPAd
 		return
 	}
 
-	sourceHostname := s.resolver.Lookup(ctx, sourceIP)
-
-	if err := s.storage.Insert(ctx, msg, sourceIP, sourceHostname); err != nil {
+	if err := s.storage.Insert(ctx, msg, sourceIP); err != nil {
 		log.Printf("Storage error: %v", err)
 		return
 	}
 
-	log.Printf("Stored log from %s (%s) [%s] %s: %s",
-		sourceIP, sourceHostname, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
+	log.Printf("Stored log from %s [%s] %s: %s",
+		sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -173,7 +168,6 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	sourceIP := remoteIP(conn.RemoteAddr())
-	sourceHostname := s.resolver.Lookup(ctx, sourceIP)
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -195,13 +189,13 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			continue
 		}
 
-		if err := s.storage.Insert(ctx, msg, sourceIP, sourceHostname); err != nil {
+		if err := s.storage.Insert(ctx, msg, sourceIP); err != nil {
 			log.Printf("Storage error: %v", err)
 			continue
 		}
 
-		log.Printf("Stored log from %s (%s) [%s] %s: %s",
-			sourceIP, sourceHostname, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
+		log.Printf("Stored log from %s [%s] %s: %s",
+			sourceIP, msg.Hostname, msg.AppName, truncate(msg.Message, 100))
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {

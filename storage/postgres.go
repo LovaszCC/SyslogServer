@@ -30,19 +30,18 @@ func New(ctx context.Context, dsn string) (*Storage, error) {
 func (s *Storage) Init(ctx context.Context) error {
 	query := `
 		CREATE TABLE IF NOT EXISTS logs (
-			id              BIGSERIAL PRIMARY KEY,
-			received_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			timestamp       TIMESTAMPTZ,
-			hostname        TEXT,
-			app_name        TEXT,
-			facility        TEXT,
-			severity        TEXT,
-			message         TEXT,
-			source_ip       TEXT,
-			source_hostname TEXT,
-			raw             TEXT NOT NULL
+			id          BIGSERIAL PRIMARY KEY,
+			received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			timestamp   TIMESTAMPTZ,
+			hostname    TEXT,
+			app_name    TEXT,
+			facility    TEXT,
+			severity    TEXT,
+			message     TEXT,
+			source_ip   TEXT,
+			raw         TEXT NOT NULL
 		);
-		ALTER TABLE logs ADD COLUMN IF NOT EXISTS source_hostname TEXT;
+		ALTER TABLE logs DROP COLUMN IF EXISTS source_hostname;
 		DO $$ BEGIN
 			IF EXISTS (SELECT 1 FROM information_schema.columns
 				WHERE table_name='logs' AND column_name='facility' AND data_type='integer') THEN
@@ -55,7 +54,6 @@ func (s *Storage) Init(ctx context.Context) error {
 		END $$;
 		CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs (received_at);
 		CREATE INDEX IF NOT EXISTS idx_logs_hostname ON logs (hostname);
-		CREATE INDEX IF NOT EXISTS idx_logs_source_hostname ON logs (source_hostname);
 		CREATE INDEX IF NOT EXISTS idx_logs_severity ON logs (severity);
 		CREATE INDEX IF NOT EXISTS idx_logs_facility ON logs (facility);
 	`
@@ -66,10 +64,10 @@ func (s *Storage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (s *Storage) Insert(ctx context.Context, msg *parser.SyslogMessage, sourceIP, sourceHostname string) error {
+func (s *Storage) Insert(ctx context.Context, msg *parser.SyslogMessage, sourceIP string) error {
 	query := `
-		INSERT INTO logs (timestamp, hostname, app_name, facility, severity, message, source_ip, source_hostname, raw)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO logs (timestamp, hostname, app_name, facility, severity, message, source_ip, raw)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
 	var ts interface{}
@@ -85,7 +83,6 @@ func (s *Storage) Insert(ctx context.Context, msg *parser.SyslogMessage, sourceI
 		msg.Severity,
 		msg.Message,
 		sourceIP,
-		nullIfEmpty(sourceHostname),
 		msg.Raw,
 	)
 	if err != nil {
@@ -96,11 +93,4 @@ func (s *Storage) Insert(ctx context.Context, msg *parser.SyslogMessage, sourceI
 
 func (s *Storage) Close() {
 	s.pool.Close()
-}
-
-func nullIfEmpty(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
 }
