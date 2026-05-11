@@ -11,6 +11,7 @@ All settings are configured via environment variables:
 | `SYSLOG_PORT` | Port to listen on        | `514`       |
 | `PROTOCOL`    | Transport: `tcp`, `udp`, or `both` | `tcp` |
 | `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each TCP connection | `false` |
+| `VENDOR_TYPE` | Vendor-specific parser: `mikrotik`, `vpn`, or empty for generic RFC3164/RFC5424 | `""` |
 | `DB_HOST`     | PostgreSQL host          | `localhost` |
 | `DB_PORT`     | PostgreSQL port          | `5432`      |
 | `DB_USER`     | PostgreSQL user          | `syslog`    |
@@ -113,6 +114,94 @@ docker compose down
 docker compose down -v
 ```
 
+## Vendor Parsers
+
+Some devices wrap their own payload format inside a syslog message. Setting `VENDOR_TYPE` (env) or `vendorType` (Helm) activates a vendor-specific post-processor that runs after the generic RFC3164/RFC5424 parse and overrides selected fields. One vendor per instance/database — deploy multiple instances if you need to ingest several vendors.
+
+Storage schema: `facility` and `severity` are stored as `TEXT` so vendor-defined labels (e.g. `wireguard`, `Low`) can coexist with the numeric RFC priority values used by the generic parser. The startup migration converts existing `INT` columns to `TEXT` automatically.
+
+### `mikrotik`
+
+Expected `message` body (pipe-delimited):
+
+```
+0|MikroTik|<model>|<firmware>|<id>|<topics>|<severity>|<key=value payload msg=...>
+```
+
+Example raw record:
+
+```
+0|MikroTik|CHR QEMU Standard PC (Q35 + ICH9, 2009)|7.20 (stable)|81|wireguard,debug|Low|dvchost=r-alphazoo-szfv-main-2 dvc=10.1.1.14 msg=AZWG4: [r-alphavet-aote] xaCnXzdvmw3pjYzJ5KxcOhVndWPbS+Owz2etocbUHk0=: Receiving keepalive packet from peer (109.74.57.32:13231)
+```
+
+Field overrides:
+
+| Column     | Source                                     | Result for the example                  |
+|------------|--------------------------------------------|-----------------------------------------|
+| `facility` | First comma-token of pipe field `[5]`      | `wireguard`                             |
+| `severity` | Pipe field `[6]`                           | `Low`                                   |
+| `message`  | Substring after `msg=` in pipe field `[7]` | `AZWG4: [r-alphavet-aote] ... peer (109.74.57.32:13231)` |
+
+If the pipe layout does not match (e.g. field `[1]` is not `MikroTik` or fewer than 8 parts), the record is left untouched and stored as parsed by the generic parser.
+
+### `vpn`
+
+Generic RFC5424 parsing strips the structured-data block (`[sd-id ...]`) from `message`. The `vpn` vendor keeps it: `message` is set to the substring of `raw` starting at the first `[` so that both the SD block and the trailing free-text are preserved.
+
+Example raw record:
+
+```
+<134>1 2026-05-11T08:43:48.661Z vpnsrv vpn-management 2754235 vpn.disconnect [vpn@32473 common_name="koczor2" vpn_ip="10.214.12.181" client_ip="39.144.89.149" bytes_received="0" bytes_sent="0" rules_removed="2"] VPN disconnect koczor2 (10.214.12.181) duration=0s
+```
+
+Resulting `message`:
+
+```
+[vpn@32473 common_name="koczor2" vpn_ip="10.214.12.181" client_ip="39.144.89.149" bytes_received="0" bytes_sent="0" rules_removed="2"] VPN disconnect koczor2 (10.214.12.181) duration=0s
+```
+
+All other columns (`timestamp`, `hostname`, `app_name`, `facility`, `severity` from PRI) come from the standard RFC5424 parse and are left as-is.
+
+### Deploying a vendor instance
+
+Docker Compose:
+
+```bash
+# .env.mikrotik
+SYSLOG_PORT=1514
+VENDOR_TYPE=mikrotik
+DB_NAME=syslog_mikrotik
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=syslog
+DB_PASSWORD=syslog
+DB_SSLMODE=disable
+```
+
+```bash
+docker compose --env-file .env.mikrotik -p mikrotik up --build -d
+```
+
+Helm:
+
+```bash
+helm install mikrotik ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set syslogPort=1514 \
+  --set vendorType=mikrotik \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password \
+  --set db.name=syslog_mikrotik
+
+helm install vpn ./helm/syslog-server \
+  --set image.repository=your-registry/syslog-server \
+  --set syslogPort=1515 \
+  --set vendorType=vpn \
+  --set db.host=your-postgres-host \
+  --set db.password=your-password \
+  --set db.name=syslog_vpn
+```
+
 ## Kubernetes Deployment (Helm)
 
 A Helm chart is provided under `helm/syslog-server/` to deploy the syslog server against an external PostgreSQL cluster. All settings — including the syslog port — are configurable via Helm values.
@@ -159,6 +248,7 @@ helm install syslog-server ./helm/syslog-server \
 | `syslogPort`       | Port to listen on        | `514`                                    |
 | `protocol`         | Transport: `tcp`, `udp`, or `both` | `udp`                          |
 | `proxyProtocol`    | Expect HAProxy PROXY protocol (TCP only) | `false`                      |
+| `vendorType`       | Vendor-specific parser: `mikrotik`, `vpn`, or empty | `""`                  |
 | `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
 | `db.port`          | PostgreSQL port          | `5432`                                   |
 | `db.user`          | PostgreSQL user          | `syslog`                                 |
