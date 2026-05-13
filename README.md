@@ -11,7 +11,7 @@ All settings are configured via environment variables:
 | `SYSLOG_PORT` | Port to listen on        | `514`       |
 | `PROTOCOL`    | Transport: `tcp`, `udp`, or `both` | `tcp` |
 | `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each TCP connection | `false` |
-| `VENDOR_TYPE` | Vendor-specific parser: `mikrotik`, `vpn`, or empty for generic RFC3164/RFC5424 | `""` |
+| `VENDOR_TYPE` | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, or empty for generic RFC3164/RFC5424 | `""` |
 | `DB_HOST`     | PostgreSQL host          | `localhost` |
 | `DB_PORT`     | PostgreSQL port          | `5432`      |
 | `DB_USER`     | PostgreSQL user          | `syslog`    |
@@ -162,6 +162,43 @@ Resulting `message`:
 
 All other columns (`timestamp`, `hostname`, `app_name`, `facility`, `severity` from PRI) come from the standard RFC5424 parse and are left as-is.
 
+### `opnsense`
+
+OPNsense emits a mix of free-form syslog records (lighttpd, configd.py, openvpn, ...) and a CSV-style payload from `filterlog` (pf packet log). The `opnsense` vendor leaves every non-`filterlog` record untouched and rewrites `filterlog` records into a compact, human-readable `message`.
+
+Expected `message` body for `filterlog` (pf CSV, common prefix):
+
+```
+rulenr,subrulenr,anchorname,rule_uuid,iface,reason,action,dir,ipver,...proto-specific fields...,src,dst,srcport,dstport,...
+```
+
+Example raw record:
+
+```
+<134>May 13 11:06:14 szfv-fw2.alpha-vet.hu filterlog[70387]: 26,,,02f4bab031b57d1e30553ce08e0ec131,vlan0.116,match,block,in,4,0x0,,64,0,0,DF,6,tcp,64,10.1.16.19,17.253.53.204,57374,443,0,S,695714130,,65535,,mss;nop;wscale;nop;nop;TS;sackOK;eol
+```
+
+Field overrides:
+
+| Column     | Source                              | Result for the example                                                  |
+|------------|-------------------------------------|-------------------------------------------------------------------------|
+| `facility` | CSV field `action` (index 6)        | `block`                                                                 |
+| `message`  | Composed from action/dir/iface/proto/src:port/dst:port/flags/length | `block in vlan0.116 tcp 10.1.16.19:57374 -> 17.253.53.204:443 flags=S len=64` |
+
+UDP example:
+
+```
+313,,,7ce275edbb8cbeec24be89e9fbc19d7d,vlan0.1001,match,pass,in,4,0x0,,62,51261,0,DF,17,udp,69,10.240.5.12,10.1.5.250,3240,53,49
+```
+
+becomes:
+
+```
+pass in vlan0.1001 udp 10.240.5.12:3240 -> 10.1.5.250:53 len=69
+```
+
+Records that are not `filterlog` (e.g. `lighttpd`, `configd.py`, `openvpn_server2`) or that do not match the expected CSV layout are stored as parsed by the generic parser.
+
 ### Deploying a vendor instance
 
 Docker Compose:
@@ -252,13 +289,33 @@ helm install syslog-server ./helm/syslog-server \
 | `syslogPort`       | Port to listen on        | `514`                                    |
 | `protocol`         | Transport: `tcp`, `udp`, or `both` | `udp`                          |
 | `proxyProtocol`    | Expect HAProxy PROXY protocol (TCP only) | `false`                      |
-| `vendorType`       | Vendor-specific parser: `mikrotik`, `vpn`, or empty | `""`                  |
+| `vendorType`       | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, or empty | `""`        |
 | `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
 | `db.port`          | PostgreSQL port          | `5432`                                   |
 | `db.user`          | PostgreSQL user          | `syslog`                                 |
 | `db.password`      | PostgreSQL password      | `syslog`                                 |
 | `db.name`          | PostgreSQL database name | `syslog`                                 |
 | `db.sslmode`       | PostgreSQL SSL mode      | `disable`                                |
+| `cleanup.enabled`  | Deploy daily archive CronJob | `true`                               |
+| `cleanup.schedule` | Cron expression          | `0 0 * * *` (midnight)                   |
+| `cleanup.timeZone` | CronJob timeZone (K8s 1.27+) | `Europe/Budapest`                    |
+| `cleanup.resources`| CronJob pod resources    | 50m/64Mi req, 500m/256Mi limit           |
+
+## Log Archival
+
+On startup the server creates `logs_archive` alongside `logs`. The Helm chart deploys a Kubernetes `CronJob` (`<release>-cleanup`) that runs daily at midnight (configurable via `cleanup.schedule` / `cleanup.timeZone`). The job uses the same container image with `args: ["cleanup"]`, which:
+
+1. Connects to the same database as the server (same env/secret).
+2. Ensures schema exists (idempotent).
+3. In a single transaction: `LOCK TABLE logs EXCLUSIVE`, `INSERT INTO logs_archive SELECT ... FROM logs`, `TRUNCATE logs RESTART IDENTITY`, `COMMIT`.
+
+The exclusive lock holds for the duration of the copy; inserts from the server briefly block but resume after commit. `logs_archive` retains `received_at` plus a fresh `archived_at` column so you can tell when each row was rolled over.
+
+Disable the CronJob with `--set cleanup.enabled=false`. Run an ad-hoc archive manually:
+
+```bash
+kubectl create job --from=cronjob/<release>-cleanup <release>-cleanup-manual
+```
 
 ### Verify
 

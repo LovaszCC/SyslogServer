@@ -60,6 +60,8 @@ func Parse(raw, vendorType string) (*SyslogMessage, error) {
 		applyMikroTik(msg)
 	case "vpn":
 		applyVPN(msg)
+	case "opnsense":
+		applyOPNsense(msg)
 	}
 
 	return msg, nil

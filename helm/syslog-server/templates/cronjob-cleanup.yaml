@@ -1,0 +1,40 @@
+{{- if .Values.cleanup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-cleanup
+  labels:
+    app: {{ .Release.Name }}
+    component: cleanup
+spec:
+  schedule: {{ .Values.cleanup.schedule | quote }}
+  timeZone: {{ .Values.cleanup.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.cleanup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cleanup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cleanup.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            app: {{ .Release.Name }}
+            component: cleanup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: cleanup
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              args: ["cleanup"]
+              envFrom:
+                - configMapRef:
+                    name: {{ .Release.Name }}-config
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-secret
+                      key: DB_PASSWORD
+              resources:
+                {{- toYaml .Values.cleanup.resources | nindent 16 }}
+{{- end }}

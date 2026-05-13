@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -17,6 +18,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	mode := ""
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+
 	log.Printf("Connecting to database at %s:%s/%s...", cfg.DBHost, cfg.DBPort, cfg.DBName)
 
 	store, err := storage.New(ctx, cfg.DSN())
@@ -29,6 +35,15 @@ func main() {
 		log.Fatalf("Failed to initialize database schema: %v", err)
 	}
 	log.Println("Database schema initialized")
+
+	if mode == "cleanup" {
+		moved, err := store.Archive(ctx)
+		if err != nil {
+			log.Fatalf("Archive failed: %v", err)
+		}
+		log.Printf("Archived %d rows from logs to logs_archive", moved)
+		return
+	}
 
 	srv := server.New(cfg.SyslogPort, cfg.Protocol, cfg.VendorType, cfg.ProxyProtocol, store)
 

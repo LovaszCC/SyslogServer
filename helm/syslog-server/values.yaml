@@ -24,3 +24,22 @@ resources:
   limits:
     cpu: 200m
     memory: 128Mi
+
+# Daily archive cron: copies logs -> logs_archive then truncates logs.
+# logs_archive table is created on server startup (init schema), so it
+# exists from day one even if cleanup is disabled.
+cleanup:
+  enabled: true
+  # Midnight in the timeZone below.
+  schedule: "0 0 * * *"
+  timeZone: "Europe/Budapest"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

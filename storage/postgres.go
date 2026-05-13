@@ -56,6 +56,23 @@ func (s *Storage) Init(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_logs_hostname ON logs (hostname);
 		CREATE INDEX IF NOT EXISTS idx_logs_severity ON logs (severity);
 		CREATE INDEX IF NOT EXISTS idx_logs_facility ON logs (facility);
+
+		CREATE TABLE IF NOT EXISTS logs_archive (
+			id           BIGSERIAL PRIMARY KEY,
+			archived_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			received_at  TIMESTAMPTZ NOT NULL,
+			timestamp    TIMESTAMPTZ,
+			hostname     TEXT,
+			app_name     TEXT,
+			facility     TEXT,
+			severity     TEXT,
+			message      TEXT,
+			source_ip    TEXT,
+			raw          TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_logs_archive_received_at ON logs_archive (received_at);
+		CREATE INDEX IF NOT EXISTS idx_logs_archive_archived_at ON logs_archive (archived_at);
+		CREATE INDEX IF NOT EXISTS idx_logs_archive_hostname ON logs_archive (hostname);
 	`
 	_, err := s.pool.Exec(ctx, query)
 	if err != nil {
@@ -89,6 +106,41 @@ func (s *Storage) Insert(ctx context.Context, msg *parser.SyslogMessage, sourceI
 		return fmt.Errorf("insert log: %w", err)
 	}
 	return nil
+}
+
+// Archive moves every row from logs into logs_archive and truncates logs.
+// Runs in a single transaction so a partial archive cannot leave the source
+// table truncated. Returns the number of rows moved.
+func (s *Storage) Archive(ctx context.Context) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin archive tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "LOCK TABLE logs IN EXCLUSIVE MODE"); err != nil {
+		return 0, fmt.Errorf("lock logs: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO logs_archive
+			(received_at, timestamp, hostname, app_name, facility, severity, message, source_ip, raw)
+		SELECT received_at, timestamp, hostname, app_name, facility, severity, message, source_ip, raw
+		FROM logs
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("copy logs to archive: %w", err)
+	}
+	moved := tag.RowsAffected()
+
+	if _, err := tx.Exec(ctx, "TRUNCATE TABLE logs RESTART IDENTITY"); err != nil {
+		return 0, fmt.Errorf("truncate logs: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit archive tx: %w", err)
+	}
+	return moved, nil
 }
 
 func (s *Storage) Close() {
