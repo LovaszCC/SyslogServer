@@ -206,6 +206,10 @@ helm install vpn ./helm/syslog-server \
 
 A Helm chart is provided under `helm/syslog-server/` to deploy the syslog server against an external PostgreSQL cluster. All settings — including the syslog port — are configurable via Helm values.
 
+
+### Example for AV usage:
+helm install syslog-server ./helm/syslog-server --namespace syslog-server --create-namespace   --set image.repository=harbor.alpha-vet.local/library/syslog-server   --set image.tag=v2.1.7   --set db.host=k8s.alpha-vet.local   --set db.password=PASSWORD   --set db.user=avit   --set db.name=syslog --set proxyProtocol=true  --set syslogPort=1514 --set protocol=tcp --set vendorType=mikrotik
+
 ### Prerequisites
 
 - Helm 3 installed
