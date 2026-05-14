@@ -11,7 +11,7 @@ All settings are configured via environment variables:
 | `SYSLOG_PORT` | Port to listen on        | `514`       |
 | `PROTOCOL`    | Transport: `tcp`, `udp`, or `both` | `tcp` |
 | `PROXY_PROTOCOL` | Expect HAProxy PROXY protocol header (v1/v2) on each TCP connection | `false` |
-| `VENDOR_TYPE` | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, or empty for generic RFC3164/RFC5424 | `""` |
+| `VENDOR_TYPE` | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, `unifi`, or empty for generic RFC3164/RFC5424 | `""` |
 | `DB_HOST`     | PostgreSQL host          | `localhost` |
 | `DB_PORT`     | PostgreSQL port          | `5432`      |
 | `DB_USER`     | PostgreSQL user          | `syslog`    |
@@ -199,6 +199,40 @@ pass in vlan0.1001 udp 10.240.5.12:3240 -> 10.1.5.250:53 len=69
 
 Records that are not `filterlog` (e.g. `lighttpd`, `configd.py`, `openvpn_server2`) or that do not match the expected CSV layout are stored as parsed by the generic parser.
 
+### `unifi`
+
+UniFi emits two distinct shapes; the `unifi` vendor handles both.
+
+**1. UniFi Network Controller** — a CEF record carried in an RFC3164 frame:
+
+```
+May 14 12:25:22 UniFi-Controller CEF:0|Ubiquiti|UniFi Network|10.0.162|546|Admin Made Config Changes|2|src=10.1.14.42 UNIFIcategory=System ... msg=sepsigav made 2 changes to System settings. Source IP: 10.1.14.42
+```
+
+CEF layout: `version|vendor|product|dev-version|signature-id|name|severity|extension`. Field overrides:
+
+| Column     | Source                          | Result for the example                                            |
+|------------|---------------------------------|-------------------------------------------------------------------|
+| `app_name` | CEF `name` (index 5)            | `Admin Made Config Changes`                                       |
+| `severity` | CEF `severity` (index 6)        | `2`                                                               |
+| `message`  | text after `msg=` in extension  | `sepsigav made 2 changes to System settings. Source IP: 10.1.14.42` |
+
+**2. UniFi APs / switches** — RFC3164 with a `<MAC>,<MODEL-FW>:` device prefix:
+
+```
+<13>May 14 12:25:27 acc-storage-tolto 6c63f8356535,USW-Lite-8-PoE-7.4.1+16850: syswrapper[27473]: Provision took 3 sec, full=0
+```
+
+The generic parser captures the whole `<MAC>,<MODEL-FW>` token as `app_name`. The vendor moves the model into `facility`, then re-extracts the real app tag and message body:
+
+| Column     | Source                                | Result for the example        |
+|------------|---------------------------------------|-------------------------------|
+| `facility` | model-firmware (after the comma)      | `USW-Lite-8-PoE-7.4.1+16850`  |
+| `app_name` | app tag from the message body         | `syswrapper`                  |
+| `message`  | text after the app tag                | `Provision took 3 sec, full=0`|
+
+Empty leading tags (`: cfgmtd[2393]: ...`) and nested tags (`mcad: mcad[416]: ...`) are handled. Records matching neither shape are stored as parsed by the generic parser.
+
 ### Deploying a vendor instance
 
 Docker Compose:
@@ -289,7 +323,7 @@ helm install syslog-server ./helm/syslog-server \
 | `syslogPort`       | Port to listen on        | `514`                                    |
 | `protocol`         | Transport: `tcp`, `udp`, or `both` | `udp`                          |
 | `proxyProtocol`    | Expect HAProxy PROXY protocol (TCP only) | `false`                      |
-| `vendorType`       | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, or empty | `""`        |
+| `vendorType`       | Vendor-specific parser: `mikrotik`, `vpn`, `opnsense`, `unifi`, or empty | `""`        |
 | `db.host`          | PostgreSQL host          | `postgres.database.svc.cluster.local`    |
 | `db.port`          | PostgreSQL port          | `5432`                                   |
 | `db.user`          | PostgreSQL user          | `syslog`                                 |

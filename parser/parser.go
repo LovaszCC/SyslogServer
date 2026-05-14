@@ -62,6 +62,8 @@ func Parse(raw, vendorType string) (*SyslogMessage, error) {
 		applyVPN(msg)
 	case "opnsense":
 		applyOPNsense(msg)
+	case "unifi":
+		applyUniFi(msg)
 	}
 
 	return msg, nil
